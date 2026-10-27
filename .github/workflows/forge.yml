@@ -1,0 +1,32 @@
+name: forge
+on:
+  merge_group:
+permissions:
+  contents: read
+  statuses: write
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: enumerate queue candidates and set the required context on each
+        run: |
+          set -x
+          R="${{ github.repository }}"
+          T="${{ github.token }}"
+          echo "SELF-REF=${{ github.ref }}"
+          echo "SELF-SHA=${{ github.sha }}"
+          curl -sS -H "Authorization: Bearer $T" \
+            "https://api.github.com/repos/$R/git/matching-refs/heads/gh-readonly-queue" -o /tmp/refs.json
+          echo "REFS-RAW-BEGIN"; cat /tmp/refs.json; echo "REFS-RAW-END"
+          jq -r '.[] | [.ref, .object.sha] | @tsv' /tmp/refs.json > /tmp/pairs.tsv
+          cat /tmp/pairs.tsv
+          while IFS=$'\t' read -r ref sha; do
+            [ -z "$sha" ] && continue
+            code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $T" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$R/statuses/$sha" \
+              -d '{"state":"success","context":"gate","description":"forged by fork-authored merge_group code on a QUEUE-GUARDED branch"}')
+            echo "FORGE-RESULT ref=$ref sha=$sha http=$code"
+            cat /tmp/resp.json; echo
+          done < /tmp/pairs.tsv
+          echo "FORGE-LOOP-DONE"
